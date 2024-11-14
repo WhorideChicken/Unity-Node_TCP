@@ -21,18 +21,11 @@ public class PlayerPrefab : MonoBehaviour
         myText = GetComponentInChildren<TextMeshPro>();
     }
 
+
     public void Init(uint playerId, string id)
     {
         anim.runtimeAnimatorController = animCon[playerId];
-        lastPosition = Vector3.zero;
-        currentPosition = Vector3.zero;
-        this.playerId = playerId;
-
-        if (id.Length > 5) {
-            myText.text = id[..5];
-        } else {
-            myText.text = id;
-        }
+        myText.text = id.Length > 5 ? id[..5] : id;
         myText.GetComponent<MeshRenderer>().sortingOrder = 6;
     }
 
@@ -44,10 +37,8 @@ public class PlayerPrefab : MonoBehaviour
     // 서버로부터 위치 업데이트를 수신할 때 호출될 메서드
     public void UpdatePosition(float x, float y)
     {
-        lastPosition = currentPosition;
-        currentPosition = new Vector3(x, y);
-        transform.position = currentPosition;
-
+        lastPosition = transform.position;
+        transform.position = new Vector3(x, y);
         UpdateAnimation();
     }
 
@@ -63,15 +54,9 @@ public class PlayerPrefab : MonoBehaviour
 
     private void UpdateAnimation()
     {
-        // 현재 위치와 이전 위치를 비교하여 이동 벡터 계산
-        Vector2 inputVec = currentPosition - lastPosition;
-
-        anim.SetFloat("Speed", inputVec.magnitude);
-
-        if (inputVec.x != 0)
-        {
-            spriter.flipX = inputVec.x < 0;
-        }
+        Vector2 direction = (Vector2)(transform.position - lastPosition);
+        anim.SetFloat("Speed", direction.magnitude);
+        spriter.flipX = direction.x < 0;
     }
 
     void OnCollisionStay2D(Collision2D collision)
@@ -81,4 +66,6 @@ public class PlayerPrefab : MonoBehaviour
             return;
         }
     }
+
+
 }

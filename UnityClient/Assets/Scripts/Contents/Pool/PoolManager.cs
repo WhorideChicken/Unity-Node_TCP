@@ -6,7 +6,6 @@ using Google.Protobuf;
 using Common;
 using Game;
 using Response;
-using Packets;
 
 public class PoolManager : MonoBehaviour
 {
@@ -14,63 +13,46 @@ public class PoolManager : MonoBehaviour
     public GameObject[] prefabs;
 
     // 풀 담당 하는 리스트들
-    List<GameObject> pool;
+    private List<GameObject> pool = new List<GameObject>();
 
     // 유저를 관리할 딕셔너리
     Dictionary<string, GameObject> userDictionary = new Dictionary<string, GameObject>();
 
-    void Awake()
+
+    public GameObject CreatePlayer(string id, float x, float y)
     {
-        pool = new List<GameObject>();
+        Debug.Log("호출 되었습니다");
+        var newPlayer = Instantiate(prefabs[0], new Vector3(x, y), Quaternion.identity);
+        if (newPlayer == null)
+        {
+            Debug.LogError("Failed to instantiate new player prefab.");
+            return null;
+        }
+
+        newPlayer.GetComponent<PlayerPrefab>().Init(0, id);
+        pool.Add(newPlayer);
+        userDictionary[id] = newPlayer;
+        return newPlayer;
     }
 
-    // LocationUpdate.UserLocation 타입의 사용자 정보를 인자로 받음
     public GameObject Get(LocationUpdate.Types.UserLocation user)
     {
-        // 유저가 이미 존재하면 해당 유저 반환
-        if (userDictionary.TryGetValue(user.Id, out GameObject existingUser))
-        {
+        if (userDictionary.TryGetValue(user.Id, out var existingUser))
             return existingUser;
-        }
 
-        GameObject select = null;
-
-        // 풀에서 비활성화된 오브젝트 찾기
-        foreach (GameObject item in pool)
-        {
-            if (!item.activeSelf)
-            {
-                select = item;
-                select.GetComponent<PlayerPrefab>().Init(user.PlayerId, user.Id);
-                select.SetActive(true);
-                userDictionary[user.Id] = select;
-                break;
-            }
-        }
-
-        // 비활성화된 오브젝트를 찾지 못한 경우 새로 생성
-        if (select == null)
-        {
-            select = Instantiate(prefabs[0], transform);
-            pool.Add(select);
-            select.GetComponent<PlayerPrefab>().Init(user.PlayerId, user.Id);
-            userDictionary[user.Id] = select;
-        }
-
-        return select;
+        var newPlayer = Instantiate(prefabs[0], transform);
+        newPlayer.GetComponent<PlayerPrefab>().Init(user.PlayerId, user.Id);
+        pool.Add(newPlayer);
+        userDictionary[user.Id] = newPlayer;
+        return newPlayer;
     }
 
     public void Remove(string userId)
     {
-        if (userDictionary.TryGetValue(userId, out GameObject userObject))
+        if (userDictionary.TryGetValue(userId, out var userObject))
         {
-            Debug.Log($"Removing user: {userId}");
             userObject.SetActive(false);
             userDictionary.Remove(userId);
-        }
-        else
-        {
-            Debug.Log($"User {userId} not found in dictionary");
         }
     }
 }

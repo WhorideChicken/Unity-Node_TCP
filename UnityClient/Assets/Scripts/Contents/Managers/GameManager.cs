@@ -28,7 +28,6 @@ public class GameManager : Singleton<GameManager>
     public void GameStart()
     {
         player.deviceId = deviceId;
-        player.gameObject.SetActive(true);
         isLive = true;
     }
 }

@@ -12,9 +12,9 @@ using Common;
 using Game;
 using GameNotification;
 using Response;
-using Packets;
 using System.Linq;
 using static UnityEditor.U2D.ScriptablePacker;
+using static Packets;
 
 public class NetworkManager : Singleton<NetworkManager>
 {
@@ -24,7 +24,8 @@ public class NetworkManager : Singleton<NetworkManager>
     private byte[] receiveBuffer = new byte[4096];
     private List<byte> incompleteData = new List<byte>();
 
-
+    private bool playerSpawned = false;
+    
     public void StartConnect(string ip, string port)
     {
         if (IsValidPort(port))
@@ -70,7 +71,6 @@ public class NetworkManager : Singleton<NetworkManager>
     {
         byte[] payloadData = payload.ToByteArray();
 
-        // CommonPacket 생성
         var commonPacket = new CommonPacket
         {
             HandlerId = handlerId,
@@ -79,35 +79,37 @@ public class NetworkManager : Singleton<NetworkManager>
             Payload = ByteString.CopyFrom(payloadData)
         };
 
-        byte[] data = commonPacket.ToByteArray(); // CommonPacket 직렬화
+        byte[] data = commonPacket.ToByteArray(); // 직렬화된 CommonPacket 생성
 
+        // 패킷 타입 설정 확인
         PacketType packetType = handlerId switch
         {
             (uint)HandlerIds.Init => PacketType.Normal,
             (uint)HandlerIds.LocationUpdate => PacketType.Location,
-            _ => PacketType.Ping
+            _ => PacketType.Ping // 기본 값
         };
 
-        // 헤더 생성 및 패킷 결합
+        // 패킷 헤더 생성 및 결합
         byte[] packetHeader = CreatePacketHeader(data.Length, packetType);
         byte[] packet = new byte[packetHeader.Length + data.Length];
 
-        Array.Copy(packetHeader, 0, packet, 0, packetHeader.Length); // 헤더 추가
-        Array.Copy(data, 0, packet, packetHeader.Length, data.Length); // 데이터 추가
-
-        Debug.Log($"Final Packet to Send: {BitConverter.ToString(packet)}"); // 디버깅 로그
+        Array.Copy(packetHeader, 0, packet, 0, packetHeader.Length);
+        Array.Copy(data, 0, packet, packetHeader.Length, data.Length);
 
         await Task.Delay(GameManager.Instance.latency);
 
-        stream.Write(packet, 0, packet.Length); // 헤더와 데이터 포함한 전체 패킷 전송
+        Debug.Log($"Sending packet of length {packet.Length}");
+
+        stream.Write(packet, 0, packet.Length); // 전체 패킷 전송
     }
+
     byte[] CreatePacketHeader(int dataLength, PacketType packetType)
     {
-        int packetLength = 4 + 1 + dataLength; // 전체 패킷 길이
+        int packetLength = 4 + 1 + dataLength;
         byte[] header = new byte[5];
         byte[] lengthBytes = BitConverter.GetBytes(packetLength);
 
-        if (BitConverter.IsLittleEndian) Array.Reverse(lengthBytes); // 엔디안 변환
+        if (BitConverter.IsLittleEndian) Array.Reverse(lengthBytes);
         Array.Copy(lengthBytes, 0, header, 0, 4);
         header[4] = (byte)packetType;
 
@@ -123,6 +125,7 @@ public class NetworkManager : Singleton<NetworkManager>
             Latency = GameManager.Instance.latency,
         };
 
+        Debug.Log(GameManager.Instance.deviceId);
         SendPacket(initialPacket, (uint)HandlerIds.Init);
     }
 
@@ -135,6 +138,7 @@ public class NetworkManager : Singleton<NetworkManager>
             InputX = inputX,
             InputY = inputY
         };
+        Debug.Log("Sending LocationUpdatePacket to server.");
         SendPacket(locationUpdatePayload, (uint)HandlerIds.LocationUpdate);
     }
 
@@ -162,33 +166,36 @@ public class NetworkManager : Singleton<NetworkManager>
     {
         incompleteData.AddRange(data.AsSpan(0, length).ToArray());
 
-        while (incompleteData.Count >= 5)
+        while (true)
         {
-            // 패킷 길이와 타입을 확인
+            if (incompleteData.Count < 5)
+            {
+                // 패킷 헤더를 읽을 수 있을 만큼 데이터가 도착하지 않음
+                break;
+            }
+
+            // 패킷 길이 및 타입 읽기
             byte[] lengthBytes = incompleteData.GetRange(0, 4).ToArray();
             if (BitConverter.IsLittleEndian) Array.Reverse(lengthBytes);
             int packetLength = BitConverter.ToInt32(lengthBytes, 0);
 
-            // 잘못된 패킷 길이 확인
-            if (packetLength <= 5 || packetLength > receiveBuffer.Length)
+            if (packetLength <= 0)
             {
-                Debug.LogError($"Invalid packet length: {packetLength}. Discarding data.");
-                incompleteData.Clear(); // 잘못된 데이터는 제거
-                return;
+                Debug.LogError("Invalid packet length received.");
+                incompleteData.Clear();
+                break;
             }
 
-            // 5번째 바이트에서 PacketType 확인
-            PacketType packetType = (PacketType)incompleteData[4];
-            Debug.Log($"Received packet - Type: {packetType}, Length: {packetLength}");
-
-            // 필요한 데이터가 아직 도착하지 않은 경우
             if (incompleteData.Count < packetLength)
             {
+                // 전체 패킷이 도착하지 않음
                 Debug.Log("Waiting for more data to complete the packet...");
-                return;
+                break;
             }
 
-            // 유효한 데이터가 도착한 경우 데이터 추출
+            // 패킷 데이터 추출 및 처리
+            byte packetTypeByte = incompleteData[4];
+            PacketType packetType = (PacketType)packetTypeByte;
             byte[] packetData = incompleteData.GetRange(5, packetLength - 5).ToArray();
             incompleteData.RemoveRange(0, packetLength);
 
@@ -219,20 +226,46 @@ public class NetworkManager : Singleton<NetworkManager>
 
     void HandleNormalPacket(byte[] packetData)
     {
-        var response = Response.Response.Parser.ParseFrom(packetData);
-        if (response.ResponseCode != 0) return;
-
-        if (response.Data.Length > 0)
+        try
         {
+            var response = Response.Response.Parser.ParseFrom(packetData);
+            Debug.Log($"Response Code: {response.ResponseCode}");
+            Debug.Log($"Handler ID: {response.HandlerId}");
+            Debug.Log($"Data Length: {response.Data.Length}");
+
+            if (response.ResponseCode != 0)
+            {
+                Debug.LogWarning("Response code is not zero, skipping packet handling.");
+                return;
+            }
+
+            if (response.Data == null || response.Data.Length == 0)
+            {
+                Debug.LogWarning("Response data is empty.");
+                return;
+            }
+
             switch ((HandlerIds)response.HandlerId)
             {
                 case HandlerIds.Init:
                     var initialResponse = InitialResponse.Parser.ParseFrom(response.Data.ToByteArray());
-                    HandleInitialResponse(initialResponse);
+                    if (initialResponse != null)
+                    {
+                        HandleInitialResponse(initialResponse);
+                    }
+                    else
+                    {
+                        Debug.LogError("InitialResponse is null after parsing.");
+                    }
+                    break;
+                default:
+                    Debug.LogWarning("Unhandled handler ID in Normal Packet");
                     break;
             }
-
-            ProcessResponseData(response.Data);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error handling packet of type Normal: {e.Message}");
         }
     }
 
@@ -253,16 +286,12 @@ public class NetworkManager : Singleton<NetworkManager>
     {
         try
         {
-            // 1. CommonPacket 디코딩
             var commonPacket = CommonPacket.Parser.ParseFrom(packetData);
-            Debug.Log($"Received CommonPacket: {commonPacket}");
-
-            // 2. payload에서 LocationUpdate 디코딩
             var locationUpdate = LocationUpdate.Parser.ParseFrom(commonPacket.Payload);
-            Debug.Log($"LocationUpdate received: {locationUpdate}");
 
-            // 3. 위치 동기화 및 사용자 생성/제거
-            Spawner.Instance.Spawn(locationUpdate);  // LocationUpdate 데이터를 스폰 처리
+            // 위치 업데이트를 Spawner에서 처리
+            Debug.Log("update");
+            Spawner.Instance.Spawn(locationUpdate);
         }
         catch (Exception e)
         {
@@ -284,6 +313,14 @@ public class NetworkManager : Singleton<NetworkManager>
 
     void HandleInitialResponse(InitialResponse initialResponse)
     {
+        if (playerSpawned)
+        {
+            Debug.Log("Player has already been spawned; skipping duplicate spawn.");
+            return;
+        }
         Debug.Log($"Initial Response: Game ID: {initialResponse.GameId}, Position: ({initialResponse.X}, {initialResponse.Y})");
+        Spawner.Instance.SpawnInitialPlayer(GameManager.Instance.deviceId, initialResponse.X, initialResponse.Y);
+        playerSpawned = true;
+
     }
 }

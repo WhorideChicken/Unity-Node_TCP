@@ -1,16 +1,43 @@
-namespace Packets
+using UnityEngine;
+using Google.Protobuf;
+using System.IO;
+using System.Buffers;
+using System.Collections.Generic;
+using System;
+using System.Text;
+
+public class Packets
 {
-    public enum HandlerIds : uint
+    public enum PacketType
     {
-        Init = 0,              // 초기화 요청
-        LocationUpdate = 1,    // 위치 업데이트 요청
-        Ping = 2               // Ping 요청
+        Normal,
+        Ping,
+        Location = 3
     }
 
-    public enum PacketType : byte
+    public enum HandlerIds
     {
-        Normal = 1,
-        Location = 2,
-        Ping = 3
+        Init = 0,
+        LocationUpdate = 2
+    }
+
+    // ProtoBuf 기반의 직렬화 메서드
+    public static void Serialize<T>(IBufferWriter<byte> writer, T data) where T : IMessage
+    {
+        data.WriteTo(writer);
+    }
+
+    // ProtoBuf 기반의 역직렬화 메서드
+    public static T Deserialize<T>(byte[] data) where T : IMessage<T>, new()
+    {
+        try
+        {
+            return new MessageParser<T>(() => new T()).ParseFrom(data);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Deserialize: Failed to deserialize data. Exception: {ex}");
+            throw;
+        }
     }
 }

@@ -7,7 +7,7 @@ using UnityEngine;
 public class Player : MonoBehaviour
 {
     public Vector2 inputVec;
-    public float speed;
+    public float speed = 10;
     public string deviceId;
     public RuntimeAnimatorController[] animCon;
 
@@ -39,7 +39,8 @@ public class Player : MonoBehaviour
         }
         myText.GetComponent<MeshRenderer>().sortingOrder = 6;
 
-        anim.runtimeAnimatorController = animCon[GameManager.Instance.playerId];
+       // Debug.Log(GameManager.Instance.playerId);
+       // anim.runtimeAnimatorController = animCon[GameManager.Instance.playerId];
     }
 
     void Update()
@@ -55,6 +56,8 @@ public class Player : MonoBehaviour
 
         // 위치 이동 패킷 전송 -> 서버로
         NetworkManager.Instance.SendLocationUpdatePacket(rigid.position.x, rigid.position.y, inputVec.x, inputVec.y);
+
+        Debug.Log("SendLocationUpdatePacket called.");
     }
 
     void FixedUpdate()

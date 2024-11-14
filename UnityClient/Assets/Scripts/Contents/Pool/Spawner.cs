@@ -6,32 +6,61 @@ using Google.Protobuf;
 using Common;
 using Game;
 using Response;
-using Packets;
+using static UnityEditor.Experimental.GraphView.GraphView;
 
 public class Spawner : Singleton<Spawner>
 {
     private HashSet<string> currentUsers = new HashSet<string>();
 
-    // LocationUpdate 데이터를 바탕으로 사용자 오브젝트 업데이트
-    public void Spawn(LocationUpdate data)
+    public void SpawnInitialPlayer(string userId, float x, float y)
     {
-        if (!GameManager.Instance.isLive)
+        if (GameManager.Instance.pool == null)
         {
+            Debug.LogError("PoolManager instance is not set in GameManager. Ensure it is initialized.");
             return;
         }
 
+        if (currentUsers.Contains(userId))
+        {
+            Debug.Log("User already exists; skipping duplicate spawn.");
+            return;
+        }
+
+        GameObject player = GameManager.Instance.pool.CreatePlayer(userId, x, y);
+        if (player != null)
+        {
+            var playerScript = player.GetComponent<PlayerPrefab>();
+            playerScript.Init(0, userId);
+            currentUsers.Add(userId); // 현재 사용자 목록에 자신의 유저 ID 추가
+        }
+        else
+        {
+            Debug.LogError("Failed to create player in SpawnInitialPlayer.");
+        }
+    }
+
+
+    public void Spawn(LocationUpdate data)
+    {
         HashSet<string> newUsers = new HashSet<string>();
 
-        // data.Users에 포함된 각 사용자 위치 정보 업데이트
-        foreach (LocationUpdate.Types.UserLocation user in data.Users) // user 데이터 접근
+        // 자신의 유저 ID를 새로운 사용자 목록에 추가하여 삭제되지 않도록 함
+        newUsers.Add(GameManager.Instance.deviceId);
+
+        foreach (var user in data.Users)
         {
+            // 자신의 유저 ID는 건너뜁니다.
+            if (user.Id == GameManager.Instance.deviceId)
+            {
+                continue;
+            }
+
             newUsers.Add(user.Id);
 
-            // 사용자가 이미 존재하는 경우 위치만 업데이트
             GameObject player = GameManager.Instance.pool.Get(user);
             if (player != null)
             {
-                PlayerPrefab playerScript = player.GetComponent<PlayerPrefab>();
+                var playerScript = player.GetComponent<PlayerPrefab>();
                 playerScript.UpdatePosition(user.X, user.Y);
             }
         }
@@ -41,7 +70,7 @@ public class Spawner : Singleton<Spawner>
         {
             if (!newUsers.Contains(userId))
             {
-                GameManager.Instance.pool.Remove(userId); // 사용자 제거
+                GameManager.Instance.pool.Remove(userId);
             }
         }
 
